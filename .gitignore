@@ -1,0 +1,4 @@
+.idea
+*.txt
+root-states.bin
+node_modules

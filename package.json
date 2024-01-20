@@ -1,0 +1,13 @@
+{
+  "name": "hexasolve",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {
+    "run": "node --max-old-space-size=4096 index.mjs"
+  },
+  "dependencies": {
+    "js-combinatorics": "^2.1.2",
+    "lodash": "^4.17.21"
+  }
+}
