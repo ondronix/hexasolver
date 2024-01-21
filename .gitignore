@@ -1,4 +1,4 @@
 .idea
 *.txt
-root-states.bin
+states-*.bin
 node_modules

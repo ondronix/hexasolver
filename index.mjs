@@ -123,6 +123,7 @@ function renderStateInArea(state, outStream = process.stdout) {
 function convertResultToVis(path, outPath) {
   const dupMap = {};
   const outS = fs.createWriteStream(outPath);
+  let cnt = 1;
   fs.readFileSync(path)
     .toString()
     .split('\n')
@@ -132,6 +133,7 @@ function convertResultToVis(path, outPath) {
       const stateHash = _.sortBy(s, 'figure').map(fState => fState.value).join('-');
       if (dupMap[stateHash]) return console.warn('DUP', stateHash);
       dupMap[stateHash] = true;
+      outS.write(`${cnt++}:\n`);
       renderStateInArea(s, outS);
     });
   outS.close(() => {
@@ -169,8 +171,8 @@ const GOAL = 2n ** 56n - 1n;
 const fmt = new Intl.NumberFormat('ru-RU');
 
 const rowBitsForLevel = [
-  [0n, 9n, 19n, 29n], // 6 517 vars (will be cached)...
-  [1n, 10n, 20n, 30n, 39n],
+  [0n, 9n, 19n, 29n], // 6 517 states
+  [1n, 10n, 20n, 30n, 39n], // 3 171 states
   [2n, 11n, 21n, 31n, 40n, 48n],
   [3n, 12n, 22n, 32n, 41n, 49n],
   [4n, 13n, 23n, 33n, 42n, 50n],
@@ -185,16 +187,17 @@ const figuresPowerSet = [...new $C.PowerSet([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1
   .filter(a => a.length > 0);
 
 let finalsCount = 0;
+let perf = { cnt: 0n, time: process.hrtime.bigint() };
 
 function trySolve({ level = 0, state = [] } = {}, recursive = true) {
   const prevValuesSum = state.reduce((acc, fState) => acc + fState.value, 0n) || 0n;
   const prevFigures = state.map(fState => fState.figure);
 
   if (prevValuesSum === GOAL || !rowBitsForLevel[level]) {
-    console.log(workerData?.workerIndex || '', 'state value:', state.length, prevValuesSum);
+    console.log(workerData?.workerIndex ?? '', 'state value:', state.length, prevValuesSum);
     renderStateInArea(state);
     if (prevValuesSum === GOAL) {
-      fs.appendFileSync(`result${workerData?.workerIndex || ''}-${workerData?.mainStartTime || now}.txt`, `${JSON.stringify(state)}\n`);
+      fs.appendFileSync(`result${workerData?.workerIndex ?? ''}-${workerData?.mainStartTime || now}.txt`, `${JSON.stringify(state)}\n`);
     }
     finalsCount++;
     return state;
@@ -206,9 +209,12 @@ function trySolve({ level = 0, state = [] } = {}, recursive = true) {
   }
 
   if (!rowBits) {
-    // go deeper
     const nextState = { level: level + 1, state };
-    return recursive ? trySolve(nextState) : [nextState];
+    return recursive ?
+      setImmediate(() => {
+        // go deeper
+        trySolve(nextState);
+      }) : [nextState];
   }
 
   const allValuesForRow = allFiguresValues
@@ -220,7 +226,7 @@ function trySolve({ level = 0, state = [] } = {}, recursive = true) {
 
   const maxCombinations = allValuesForRow.reduce((acc, v) => acc * v.length, 1);
   // console.log('allValuesForRow:', allValuesForRow.map(values => values.length));
-  console.log(workerData?.workerIndex || '', `maxCombinations (l=${level}, s=${prevFigures}):`, fmt.format(maxCombinations));
+  // console.log(workerData?.workerIndex ?? '', `maxCombinations (l=${level}, s=${prevFigures}):`, fmt.format(maxCombinations));
 
   const figureIndexesVariants = figuresPowerSet
     .filter(v => v.length <= rowBitsForLevel[level].length);
@@ -233,7 +239,6 @@ function trySolve({ level = 0, state = [] } = {}, recursive = true) {
       const sum = p.reduce((acc, v) => acc + v);
       const notIntersected = orUnion === sum && !(prevValuesSum & orUnion);
       if (notIntersected && ((orUnion | prevValuesSum) & rowBits) === rowBits) {
-        // go deeper
         const nextState = {
           level: level + 1,
           state: [
@@ -244,38 +249,55 @@ function trySolve({ level = 0, state = [] } = {}, recursive = true) {
           ],
         };
         if (recursive) {
-          trySolve(nextState);
+          setImmediate(() => {
+            // go deeper
+            trySolve(nextState);
+          });
         } else {
           nextStates.push(nextState);
         }
       }
+      // if (++perf.cnt >= 100_000n) {
+      //   const dur = process.hrtime.bigint() - perf.time;
+      //   const speedPerSec = 1_000_000_000n * perf.cnt / dur;
+      //   console.log(workerData?.workerIndex ?? '', 'perf:', `${fmt.format(speedPerSec)}/sec`);
+      //   perf.cnt = 0n;
+      //   perf.time = process.hrtime.bigint();
+      // }
     }
   }
   return nextStates;
 }
 
-
-// convertResultToVis('result-next.txt', 'viz-next.txt');
+// try svg!
+// convertResultToVis('result-1705760123181.txt', 'viz-result-1705760123181.txt');
 
 if (isMainThread) {
-  const NUM_OF_WORKERS = 4;
-  const ROOT_STATES_FILE = 'root-states.bin';
+  const NUM_OF_WORKERS = 8;
+
+  const START_LEVEL = 1;
+  const STATES_FILE = `states-${START_LEVEL}.bin`;
 
   let rootStates = [];
-  if (fs.existsSync(ROOT_STATES_FILE)) {
-    rootStates = v8.deserialize(fs.readFileSync(ROOT_STATES_FILE));
+  if (fs.existsSync(STATES_FILE)) {
+    rootStates = v8.deserialize(fs.readFileSync(STATES_FILE));
   } else {
     rootStates = trySolve({}, false);
-    fs.writeFileSync(ROOT_STATES_FILE, v8.serialize(rootStates));
+    fs.writeFileSync(STATES_FILE, v8.serialize(rootStates));
   }
 
-  rootStates = shuffle(rootStates);
+  // rootStates = shuffle(rootStates);
+  console.log('START_LEVEL:', START_LEVEL);
   console.log('rootStates ready:', fmt.format(rootStates.length));
+
+  const nextLevelStates = [];
 
   const workers = new Map();
   const handlers = {
     onMessage(msg) {
-      if (msg === 'done') this.postMessage(rootStates.shift());
+      if (msg?.length) nextLevelStates.push(msg);
+      this.postMessage(rootStates.shift());
+      console.log('==== states left:', fmt.format(rootStates.length), '====');
     },
     onExit(code) {
       if (code !== 0) {
@@ -283,8 +305,11 @@ if (isMainThread) {
       }
       workers.delete(this);
       if (workers.size === 0) {
-        console.log('All workers exited. Done!', fmt.format(finalsCount));
+        console.log('All workers exited. Done!', fmt.format(nextLevelStates.length));
+        fs.writeFileSync(`states-${START_LEVEL + 1}.bin`, v8.serialize(nextLevelStates));
         process.exit();
+      } else {
+        console.log('active workers left: ', workers.size);
       }
     },
   };
@@ -304,9 +329,9 @@ if (isMainThread) {
       console.log(`Worker ${workerData.workerIndex} got nothing - exiting`);
       process.exit();
     }
-    // console.log(`Worker ${workerData.workerIndex} got next state:`, nextState);
-    trySolve(nextState);
-    parentPort.postMessage('done');
+    setImmediate(() => {
+      parentPort.postMessage(trySolve(nextState, false));
+    });
   });
   setInterval(() => {
   }, 1 << 30);
