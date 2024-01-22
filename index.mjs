@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import v8 from 'node:v8';
+import readline from 'node:readline';
 import { setInterval } from 'node:timers';
 import {
   Worker, isMainThread, parentPort, workerData,
@@ -172,7 +173,7 @@ const fmt = new Intl.NumberFormat('ru-RU');
 
 const rowBitsForLevel = [
   [0n, 9n, 19n, 29n], // 6 517 states
-  [1n, 10n, 20n, 30n, 39n], // 3 171 states
+  [1n, 10n, 20n, 30n, 39n], // 66 339 states
   [2n, 11n, 21n, 31n, 40n, 48n],
   [3n, 12n, 22n, 32n, 41n, 49n],
   [4n, 13n, 23n, 33n, 42n, 50n],
@@ -186,8 +187,7 @@ const rowBitsForLevel = [
 const figuresPowerSet = [...new $C.PowerSet([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])]
   .filter(a => a.length > 0);
 
-let finalsCount = 0;
-let perf = { cnt: 0n, time: process.hrtime.bigint() };
+const perf = { cnt: 0n, time: process.hrtime.bigint() };
 
 function trySolve({ level = 0, state = [] } = {}, recursive = true) {
   const prevValuesSum = state.reduce((acc, fState) => acc + fState.value, 0n) || 0n;
@@ -199,7 +199,6 @@ function trySolve({ level = 0, state = [] } = {}, recursive = true) {
     if (prevValuesSum === GOAL) {
       fs.appendFileSync(`result${workerData?.workerIndex ?? ''}-${workerData?.mainStartTime || now}.txt`, `${JSON.stringify(state)}\n`);
     }
-    finalsCount++;
     return state;
   }
 
@@ -273,31 +272,42 @@ function trySolve({ level = 0, state = [] } = {}, recursive = true) {
 // convertResultToVis('result-1705760123181.txt', 'viz-result-1705760123181.txt');
 
 if (isMainThread) {
-  const NUM_OF_WORKERS = 8;
+  const NUM_OF_WORKERS = 4;
 
+  const START_FROM_INDEX = 0;
   const START_LEVEL = 1;
   const STATES_FILE = `states-${START_LEVEL}.bin`;
+  const NEXT_STATES_FILE = `states-${START_LEVEL + 1}.bin`;
 
   let rootStates = [];
   if (fs.existsSync(STATES_FILE)) {
     rootStates = v8.deserialize(fs.readFileSync(STATES_FILE));
-  } else {
+  } else if (START_LEVEL === 0) {
     rootStates = trySolve({}, false);
     fs.writeFileSync(STATES_FILE, v8.serialize(rootStates));
   }
 
-  // rootStates = shuffle(rootStates);
+  let nextLevelStates = [];
+  if (fs.existsSync(NEXT_STATES_FILE)) {
+    nextLevelStates = v8.deserialize(fs.readFileSync(NEXT_STATES_FILE));
+    console.log('nextLevelStates found:', fmt.format(nextLevelStates.length));
+  }
+
+  const ROOT_STATES_INITIAL_SIZE = rootStates.length;
+
+  if (START_FROM_INDEX > 0) {
+    rootStates = rootStates.slice(START_FROM_INDEX);
+  }
+
   console.log('START_LEVEL:', START_LEVEL);
   console.log('rootStates ready:', fmt.format(rootStates.length));
-
-  const nextLevelStates = [];
 
   const workers = new Map();
   const handlers = {
     onMessage(msg) {
-      if (msg?.length) nextLevelStates.push(msg);
+      if (msg?.length) nextLevelStates.push(...msg);
+      console.log('found/left:', `${nextLevelStates.length}/${rootStates.length}`);
       this.postMessage(rootStates.shift());
-      console.log('==== states left:', fmt.format(rootStates.length), '====');
     },
     onExit(code) {
       if (code !== 0) {
@@ -306,7 +316,7 @@ if (isMainThread) {
       workers.delete(this);
       if (workers.size === 0) {
         console.log('All workers exited. Done!', fmt.format(nextLevelStates.length));
-        fs.writeFileSync(`states-${START_LEVEL + 1}.bin`, v8.serialize(nextLevelStates));
+        fs.writeFileSync(NEXT_STATES_FILE, v8.serialize(nextLevelStates));
         process.exit();
       } else {
         console.log('active workers left: ', workers.size);
@@ -322,6 +332,17 @@ if (isMainThread) {
       .on('exit', handlers.onExit.bind(worker));
     workers.set(worker, i);
   }
+
+  readline.emitKeypressEvents(process.stdin);
+  process.stdin.setRawMode(true);
+  process.stdin.on('keypress', (str, key) => {
+    if (key.ctrl && key.name === 'c') {
+      console.log('Completing last root states and exiting');
+      console.log('Next time start from index: ', ROOT_STATES_INITIAL_SIZE - rootStates.length);
+      rootStates.length = 0;
+    }
+  });
+
   [...workers.keys()].forEach(w => w.postMessage(rootStates.shift()));
 } else {
   parentPort.on('message', (nextState) => {

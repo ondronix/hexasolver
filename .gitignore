@@ -1,4 +1,5 @@
 .idea
 *.txt
+*.zip
 states-*.bin
 node_modules
