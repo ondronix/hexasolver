@@ -1,5 +1,6 @@
 # Hexagonal puzzle solver
 
+https://ondronix.github.io/hexasolver/ (not all found yet)
 
 ## Area
 
