@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>HEX PUZZLE VARIANTS</title>
+  <style>
+      /* other styling */
+      svg {
+          -webkit-filter: drop-shadow(3px 3px 2px rgba(0, 0, 0, .7));
+          filter: drop-shadow(3px 3px 2px rgba(0, 0, 0, .7));
+      }
+
+      body {
+          display: grid;
+          grid-template-columns: repeat(5, 1fr);
+          grid-template-rows: repeat(2, 170px);
+          gap: 20px;
+      }
+
+      h3 {
+          position: relative;
+          top: 10px;
+          left: 20px;
+      }
+  </style>
+  <script>
+    const allGamePoses = [Array.from({ length: 9 }, (_, x) => [3 + 2 * x, 0, x]), // 9
+      Array.from({ length: 10 }, (_, x) => [2 + 2 * x, 1, 9 + x]), // 10
+      Array.from({ length: 10 }, (_, x) => [1 + 2 * x, 2, 19 + x]), // 10
+      Array.from({ length: 10 }, (_, x) => [2 * x, 3, 29 + x]), // 10
+      Array.from({ length: 9 }, (_, x) => [1 + 2 * x, 4, 39 + x]), // 9
+      Array.from({ length: 8 }, (_, x) => [2 + 2 * x, 5, 48 + x]) // 8
+    ].flat();
+    const colors = [
+      '#c7172b',
+      '#6dd7e9',
+      '#f56e79',
+      '#e686b2',
+      '#78d4b8',
+      '#0f9ca1',
+      '#f6540e',
+      '#f5c00e',
+      '#09216e',
+      '#13b9eb',
+      '#87b10c',
+      '#5b2c74',
+    ];
+
+    const resultsPromise = fetch('./results-data.json').then(r => r.json());
+
+    const perPage = 25;
+    let startIndex = 0;
+    let total = 0;
+
+    async function renderResults() {
+      const r_step = 15;
+      const c_step = 9;
+
+      const results = await resultsPromise;
+
+      total = results.length;
+
+      document.querySelectorAll('.result-block').forEach((el) => el.remove());
+
+      document.title = `Results: ${startIndex}-${startIndex + perPage} from ${total}`;
+
+      for (const result of results.slice(startIndex, startIndex + perPage)) {
+        const items = [];
+        allGamePoses.forEach(([c, r], i) => {
+          const { figure } = result.find(fState => BigInt(fState.value) & BigInt(2 ** i));
+          items.push(`<use xlink:href="#hexagon" transform="translate(${c_step * c}, ${r_step * r})" fill="${colors[figure]}" />`);
+        });
+        window.body.innerHTML += `
+          <div class="result-block">
+            <svg viewBox="-10 -10 200 100"><g>${items.join('')}</g></svg>
+          </div>`;
+      }
+    }
+
+    document.addEventListener('click', () => {
+      startIndex = (startIndex + perPage) % total;
+      renderResults();
+    });
+
+    document.addEventListener('DOMContentLoaded', function (event) {
+      renderResults();
+    });
+  </script>
+</head>
+<body id="body">
+<svg viewBox="0 0 0 0" style="display: none;">
+  <defs>
+    <g id="hexagon">
+      <polygon
+        stroke="#000000"
+        stroke-width="0.3"
+        points="0,-10 9,-5 9,5 0,10 -9,5 -9,-5 0,-10"
+      />
+    </g>
+  </defs>
+</svg>
+</body>
+</html>
