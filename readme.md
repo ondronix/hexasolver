@@ -1,4 +1,4 @@
-### Hexagonal puzzle solver
+# Hexagonal puzzle solver
 
 
 ## Area
