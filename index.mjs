@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import zlib from 'node:zlib';
 import v8 from 'node:v8';
 import readline from 'node:readline';
 import { setInterval } from 'node:timers';
@@ -46,10 +47,7 @@ const gameArea = [Array.from({ length: 9 }, (_, x) => [3 + 2 * x, 0, x]), // 9
   Array.from({ length: 8 }, (_, x) => [2 + 2 * x, 5, 48 + x]) // 8
 ];
 
-const allGamePoses = gameArea.reduce((acc, v) => {
-  acc.push(...v);
-  return acc;
-});
+const allGamePoses = gameArea.flat();
 
 const allGamePosesHashes = allGamePoses.map(posToHash);
 
@@ -121,28 +119,6 @@ function renderStateInArea(state, outStream = process.stdout) {
   outStream.write('\n');
 }
 
-function convertResultToVis(path, outPath) {
-  const dupMap = {};
-  const outS = fs.createWriteStream(outPath);
-  let cnt = 1;
-  fs.readFileSync(path)
-    .toString()
-    .split('\n')
-    .filter(t => t)
-    .map(t => JSON.parse(t, (k, v) => k === 'value' ? BigInt(v) : v))
-    .forEach(s => {
-      const stateHash = _.sortBy(s, 'figure').map(fState => fState.value).join('-');
-      if (dupMap[stateHash]) return console.warn('DUP', stateHash);
-      dupMap[stateHash] = true;
-      outS.write(`${cnt++}:\n`);
-      renderStateInArea(s, outS);
-    });
-  outS.close(() => {
-    process.exit(0);
-  });
-}
-
-
 const allFiguresValues = [];
 
 figures.forEach((figureDefault, i) => {
@@ -171,31 +147,37 @@ const GOAL = 2n ** 56n - 1n;
 
 const fmt = new Intl.NumberFormat('ru-RU');
 
-const rowBitsForLevel = [
+const rowBitsForLevel_Diag = [
   [0n, 9n, 19n, 29n], // 6 517 states
-  [1n, 10n, 20n, 30n, 39n], // 66 339 states
-  [2n, 11n, 21n, 31n, 40n, 48n],
-  [3n, 12n, 22n, 32n, 41n, 49n],
-  [4n, 13n, 23n, 33n, 42n, 50n],
-  [5n, 14n, 24n, 34n, 43n, 51n],
+  [1n, 10n, 20n, 30n, 39n], // 66 339 (x10.1)
+  [2n, 11n, 21n, 31n, 40n, 48n], // 426 446 (x6.4)
+  [3n, 12n, 22n, 32n, 41n, 49n], // 2 710 769 (x6.3)
+  [4n, 13n, 23n, 33n, 42n, 50n], // 12 300 144 (x4.5)
+  [5n, 14n, 24n, 34n, 43n, 51n], // ~40e6
   [6n, 15n, 25n, 35n, 44n, 52n],
   [7n, 16n, 26n, 36n, 45n, 53n],
   [8n, 17n, 27n, 37n, 46n, 54n],
   /**/[18n, 28n, 38n, 47n, 55n]
 ];
 
+
+const rowBitsForLevel_Round = [
+  [0n, 1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 18n, 28n, 38n, 47n, 55n, 54n, 53n, 52n, 51n, 50n, 49n, 48n, 39n, 29n, 19n, 9n],
+  [10n, 11n, 12n, 13n, 14n, 15n, 16n, 17n, 27n, 37n, 46n, 45n, 44n, 43n, 42n, 41n, 40n, 30n, 20n],
+  [21n, 22n, 23n, 24n, 25n, 26n, 36n, 35n, 34n, 33n, 32n, 31n]
+];
+
+const rowBitsForLevel = rowBitsForLevel_Diag;
+
 const figuresPowerSet = [...new $C.PowerSet([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])]
   .filter(a => a.length > 0);
-
-const perf = { cnt: 0n, time: process.hrtime.bigint() };
 
 function trySolve({ level = 0, state = [] } = {}, recursive = true) {
   const prevValuesSum = state.reduce((acc, fState) => acc + fState.value, 0n) || 0n;
   const prevFigures = state.map(fState => fState.figure);
 
   if (prevValuesSum === GOAL || !rowBitsForLevel[level]) {
-    console.log(workerData?.workerIndex ?? '', 'state value:', state.length, prevValuesSum);
-    renderStateInArea(state);
+    // renderStateInArea(state);
     if (prevValuesSum === GOAL) {
       fs.appendFileSync(`result${workerData?.workerIndex ?? ''}-${workerData?.mainStartTime || now}.txt`, `${JSON.stringify(state)}\n`);
     }
@@ -223,12 +205,9 @@ function trySolve({ level = 0, state = [] } = {}, recursive = true) {
       return filteredValues.length ? filteredValues : [0n];
     });
 
-  const maxCombinations = allValuesForRow.reduce((acc, v) => acc * v.length, 1);
-  // console.log('allValuesForRow:', allValuesForRow.map(values => values.length));
-  // console.log(workerData?.workerIndex ?? '', `maxCombinations (l=${level}, s=${prevFigures}):`, fmt.format(maxCombinations));
-
+  const numOfEmptyCellsInRow = rowBitsForLevel[level].reduce((a, v) => a + ((rowBits & (2n ** v)) ? 1 : 0), 0);
   const figureIndexesVariants = figuresPowerSet
-    .filter(v => v.length <= rowBitsForLevel[level].length);
+    .filter(v => v.length <= numOfEmptyCellsInRow);
 
   const nextStates = [];
   for (const indexes of figureIndexesVariants) {
@@ -256,26 +235,26 @@ function trySolve({ level = 0, state = [] } = {}, recursive = true) {
           nextStates.push(nextState);
         }
       }
-      // if (++perf.cnt >= 100_000n) {
-      //   const dur = process.hrtime.bigint() - perf.time;
-      //   const speedPerSec = 1_000_000_000n * perf.cnt / dur;
-      //   console.log(workerData?.workerIndex ?? '', 'perf:', `${fmt.format(speedPerSec)}/sec`);
-      //   perf.cnt = 0n;
-      //   perf.time = process.hrtime.bigint();
-      // }
     }
   }
   return nextStates;
 }
 
-// try svg!
-// convertResultToVis('result-1705760123181.txt', 'viz-result-1705760123181.txt');
+process
+  .on('unhandledRejection', (e) => {
+    console.error(e);
+    process.exit(1);
+  })
+  .on('uncaughtException', (e) => {
+    console.error(e);
+    process.exit(1);
+  });
 
 if (isMainThread) {
   const NUM_OF_WORKERS = 4;
 
   const START_FROM_INDEX = 0;
-  const START_LEVEL = 1;
+  const START_LEVEL = 4;
   const STATES_FILE = `states-${START_LEVEL}.bin`;
   const NEXT_STATES_FILE = `states-${START_LEVEL + 1}.bin`;
 
@@ -296,18 +275,20 @@ if (isMainThread) {
   const ROOT_STATES_INITIAL_SIZE = rootStates.length;
 
   if (START_FROM_INDEX > 0) {
-    rootStates = rootStates.slice(START_FROM_INDEX);
+    rootStates = rootStates.slice(0, -START_FROM_INDEX);
   }
 
   console.log('START_LEVEL:', START_LEVEL);
-  console.log('rootStates ready:', fmt.format(rootStates.length));
+  console.log('rootStates ready:', fmt.format(ROOT_STATES_INITIAL_SIZE), ', left:', fmt.format(rootStates.length));
 
   const workers = new Map();
   const handlers = {
-    onMessage(msg) {
-      if (msg?.length) nextLevelStates.push(...msg);
-      console.log('found/left:', `${nextLevelStates.length}/${rootStates.length}`);
-      this.postMessage(rootStates.shift());
+    onMessage(states) {
+      if (states?.length) {
+        nextLevelStates.push(...states);
+      }
+      console.log('found/left:', `${fmt.format(nextLevelStates.length)} / ${fmt.format(rootStates.length)}`);
+      this.postMessage(rootStates.pop());
     },
     onExit(code) {
       if (code !== 0) {
@@ -336,14 +317,14 @@ if (isMainThread) {
   readline.emitKeypressEvents(process.stdin);
   process.stdin.setRawMode(true);
   process.stdin.on('keypress', (str, key) => {
-    if (key.ctrl && key.name === 'c') {
+    if (key.ctrl && key.name === 'c' && rootStates.length > 0) {
       console.log('Completing last root states and exiting');
       console.log('Next time start from index: ', ROOT_STATES_INITIAL_SIZE - rootStates.length);
       rootStates.length = 0;
     }
   });
 
-  [...workers.keys()].forEach(w => w.postMessage(rootStates.shift()));
+  [...workers.keys()].forEach(w => w.postMessage(rootStates.pop()));
 } else {
   parentPort.on('message', (nextState) => {
     if (!nextState) {
@@ -351,7 +332,8 @@ if (isMainThread) {
       process.exit();
     }
     setImmediate(() => {
-      parentPort.postMessage(trySolve(nextState, false));
+      const states = trySolve(nextState, false);
+      parentPort.postMessage(states);
     });
   });
   setInterval(() => {

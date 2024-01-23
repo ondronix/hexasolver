@@ -6,60 +6,70 @@
   <style>
       /* other styling */
       svg {
-          width: 500px;
-          flex: 1;
-      }
-
-      svg g.area :nth-child(2) path {
-          fill: Yellow;
+          -webkit-filter: drop-shadow(3px 3px 2px rgba(0, 0, 0, .7));
+          filter: drop-shadow(3px 3px 2px rgba(0, 0, 0, .7));
       }
 
       body {
-          display: flex;
-          justify-content: left;
-          align-items: center;
-          flex-direction: column;
+          display: grid;
+          grid-template-columns: repeat(5, 1fr);
+          grid-template-rows: repeat(2, 170px);
+          gap: 20px;
       }
   </style>
-</head>
-<body>
+  <script>
+    const allGamePoses = [Array.from({ length: 9 }, (_, x) => [3 + 2 * x, 0, x]), // 9
+      Array.from({ length: 10 }, (_, x) => [2 + 2 * x, 1, 9 + x]), // 10
+      Array.from({ length: 10 }, (_, x) => [1 + 2 * x, 2, 19 + x]), // 10
+      Array.from({ length: 10 }, (_, x) => [2 * x, 3, 29 + x]), // 10
+      Array.from({ length: 9 }, (_, x) => [1 + 2 * x, 4, 39 + x]), // 9
+      Array.from({ length: 8 }, (_, x) => [2 + 2 * x, 5, 48 + x]) // 8
+    ].flat();
+    const colors = [
+      '#c7172b',
+      '#6dd7e9',
+      '#f56e79',
+      '#e686b2',
+      '#78d4b8',
+      '#0f9ca1',
+      '#f6540e',
+      '#f5c00e',
+      '#09216e',
+      '#13b9eb',
+      '#87b10c',
+      '#5b2c74',
+    ];
 
-<svg viewBox="-10 -10 200 100">
+    document.addEventListener('DOMContentLoaded', async function (event) {
+      const r_step = 15;
+      const c_step = 9;
+
+      const results = await fetch('./many-results-latest.txt')
+        .then(r => r.text())
+        .then(t => t.split('\n').filter(v => v).map(s => JSON.parse(s)));
+
+      for (const result of results.slice(0, 40)) {
+        const items = [];
+        allGamePoses.forEach(([c, r], i) => {
+          const { figure } = result.find(fState => BigInt(fState.value) & BigInt(2 ** i));
+          items.push(`<use xlink:href="#hexagon" transform="translate(${c_step * c}, ${r_step * r})" fill="${colors[figure]}" />`);
+        });
+        window.body.innerHTML += `<svg viewBox="-10 -10 200 100"><g>${items.join('')}</g></svg>`;
+      }
+    });
+  </script>
+</head>
+<body id="body">
+<svg viewBox="0 0 0 0" style="display: none;">
   <defs>
     <g id="hexagon">
-      <polygon stroke="#000000" stroke-width="0.3" points="0,-10 9,-5 9,5 0,10 -9,5 -9,-5 0,-10" />
+      <polygon
+        stroke="#000000"
+        stroke-width="0.3"
+        points="0,-10 9,-5 9,5 0,10 -9,5 -9,-5 0,-10"
+      />
     </g>
   </defs>
-
-  <g class="area" id="area">
-    <use xlink:href="#hexagon" transform="translate(10, 0)" fill="red" />
-    <use xlink:href="#hexagon" transform="translate(28, 0)" fill="red" />
-    <use xlink:href="#hexagon" transform="translate(46, 0)" fill="blue" />
-    <use xlink:href="#hexagon" transform="translate(64, 0)" fill="blue" />
-    <use xlink:href="#hexagon" transform="translate(82, 0)" fill="blue" />
-    <use xlink:href="#hexagon" transform="translate(100, 0)" fill="blue" />
-    <use xlink:href="#hexagon" transform="translate(118, 0)" fill="blue" />
-    <use xlink:href="#hexagon" transform="translate(136, 0)" fill="blue" />
-    <use xlink:href="#hexagon" transform="translate(154, 0)" fill="blue" />
-
-    <use xlink:href="#hexagon" transform="translate(19, 15)" fill="red" />
-    <use xlink:href="#hexagon" transform="translate(37, 15)" fill="blue" />
-    <use xlink:href="#hexagon" transform="translate(55, 15)" fill="blue" />
-    <use xlink:href="#hexagon" transform="translate(73, 15)" fill="blue" />
-  </g>
 </svg>
-<script>
-  document.addEventListener('DOMContentLoaded', function (event) {
-    const r_step = 15;
-    const c_step = 18;
-    const items = [];
-    for (let r = 0; r < 5; r++) {
-      for (let c = 0; c < 10; c++) {
-        items.push(`<use xlink:href="#hexagon" transform="translate(${(r % 2 ? 0 : c_step / 2) + c_step * c}, ${r_step * r})" fill="white" />`);
-      }
-    }
-    window.area.innerHTML = items.join('');
-  });
-</script>
 </body>
 </html>

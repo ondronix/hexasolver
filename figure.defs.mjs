@@ -24,7 +24,7 @@ export default [
     [-1, 1], [1, 1], [3, 1]
   ].asymmetric(),
 
-  // 3: rose (asymmetric)
+  // 3: pink (asymmetric)
   [
     [0, 0], [2, 0], [6, 0],
     [3, 1], [5, 1]
