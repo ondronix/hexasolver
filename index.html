@@ -76,8 +76,10 @@
       }
     }
 
-    document.addEventListener('click', () => {
-      startIndex = (startIndex + perPage) % total;
+    document.addEventListener('click', (event) => {
+      const step = event.pageX > window.innerWidth / 2 ? perPage : -perPage;
+      if (startIndex + step < 0) startIndex += total;
+      startIndex = (startIndex + step) % total;
       renderResults();
     });
 
