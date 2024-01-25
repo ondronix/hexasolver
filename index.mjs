@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import zlib from 'node:zlib';
 import v8 from 'node:v8';
 import readline from 'node:readline';
 import { setInterval } from 'node:timers';
@@ -121,6 +120,8 @@ function renderStateInArea(state, outStream = process.stdout) {
 
 const allFiguresValues = [];
 
+const borderBits = [0n, 1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 18n, 28n, 38n, 47n, 55n, 54n, 53n, 52n, 51n, 50n, 49n, 48n, 39n, 29n, 19n, 9n];
+
 figures.forEach((figureDefault, i) => {
   const figureValues = [];
 
@@ -132,8 +133,15 @@ figures.forEach((figureDefault, i) => {
       for (const rot of rotations) {
         const movedFigure = rotateAndMoveFigure(figure, rot, basePos);
         if (movedFigure.every(isPosInBoundaries)) {
-          figureValues.push(figureToGameValue(movedFigure));
-          // if (i === 1) renderFigureInArea(movedFigure);
+          const fValue = figureToGameValue(movedFigure);
+          const borderIntersectionStr = borderBits.reduce((a, v) => {
+            a.push(fValue & 2n ** v ? '1' : '0');
+            return a;
+          }, []).join('');
+          const borderIntersectionStr2 = borderIntersectionStr.substring(10) + borderIntersectionStr.substring(0, 10);
+          if (/10{1,3}1/.test(borderIntersectionStr) || /10{1,3}1/.test(borderIntersectionStr2)) continue;
+          figureValues.push(fValue);
+          // if (i === 0) renderFigureInArea(movedFigure);
         }
       }
     }
@@ -147,7 +155,7 @@ const GOAL = 2n ** 56n - 1n;
 
 const fmt = new Intl.NumberFormat('ru-RU');
 
-const rowBitsForLevel_Diag = [
+const rowBitsForLevel = [
   [0n, 9n, 19n, 29n], // 6 517 states
   [1n, 10n, 20n, 30n, 39n], // 66 339
   [2n, 11n, 21n, 31n, 40n, 48n], // 460 352
@@ -159,8 +167,6 @@ const rowBitsForLevel_Diag = [
   [8n, 17n, 27n, 37n, 46n, 54n],
   /**/[18n, 28n, 38n, 47n, 55n]
 ];
-
-const rowBitsForLevel = rowBitsForLevel_Diag;
 
 const figuresPowerSet = [...new $C.PowerSet([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])]
   .filter(a => a.length > 0);
@@ -184,11 +190,7 @@ function trySolve({ level = 0, state = [] } = {}, recursive = true) {
 
   if (!rowBits) {
     const nextState = { level: level + 1, state };
-    return recursive ?
-      setImmediate(() => {
-        // go deeper
-        trySolve(nextState);
-      }) : [nextState];
+    return recursive ? trySolve(nextState) : [nextState];
   }
 
   const allValuesForRow = allFiguresValues
@@ -220,10 +222,8 @@ function trySolve({ level = 0, state = [] } = {}, recursive = true) {
           ],
         };
         if (recursive) {
-          setImmediate(() => {
-            // go deeper
-            trySolve(nextState);
-          });
+          // go deeper
+          trySolve(nextState);
         } else {
           nextStates.push(nextState);
         }
@@ -244,10 +244,11 @@ process
   });
 
 if (isMainThread) {
-  const NUM_OF_WORKERS = 2;
+  const NUM_OF_WORKERS = 4;
 
+  const DEEP_FIRST_SEARCH = true;
   const START_FROM_INDEX = 0;
-  const START_LEVEL = 0;
+  const START_LEVEL = 2;
   const STATES_FILE = `states-${START_LEVEL}.bin`;
   const NEXT_STATES_FILE = `states-${START_LEVEL + 1}.bin`;
 
@@ -280,7 +281,11 @@ if (isMainThread) {
       if (states?.length) {
         nextLevelStates.push(...states);
       }
-      console.log('found/left:', `${fmt.format(nextLevelStates.length)} / ${fmt.format(rootStates.length)}`);
+      if (DEEP_FIRST_SEARCH) {
+        console.log(new Date().toISOString(), 'found/left:', fmt.format(rootStates.length));
+      } else {
+        console.log(new Date().toISOString(), 'found/left:', `${fmt.format(nextLevelStates.length)} / ${fmt.format(rootStates.length)}`);
+      }
       this.postMessage(rootStates.pop());
     },
     onExit(code) {
@@ -290,7 +295,9 @@ if (isMainThread) {
       workers.delete(this);
       if (workers.size === 0) {
         console.log('All workers exited. Done!', fmt.format(nextLevelStates.length));
-        fs.writeFileSync(NEXT_STATES_FILE, v8.serialize(nextLevelStates));
+        if (!DEEP_FIRST_SEARCH) {
+          fs.writeFileSync(NEXT_STATES_FILE, v8.serialize(nextLevelStates));
+        }
         process.exit();
       } else {
         console.log('active workers left: ', workers.size);
@@ -299,7 +306,7 @@ if (isMainThread) {
   };
   for (let i = 0; i < NUM_OF_WORKERS; i++) {
     const worker = new Worker(__filename, {
-      workerData: { workerIndex: i, mainStartTime: now },
+      workerData: { workerIndex: i, mainStartTime: now, DEEP_FIRST_SEARCH },
     });
     worker
       .on('message', handlers.onMessage.bind(worker))
@@ -325,8 +332,8 @@ if (isMainThread) {
       process.exit();
     }
     setImmediate(() => {
-      const states = trySolve(nextState, false);
-      parentPort.postMessage(states);
+      const states = trySolve(nextState, workerData.DEEP_FIRST_SEARCH);
+      parentPort.postMessage(states ?? []);
     });
   });
   setInterval(() => {
